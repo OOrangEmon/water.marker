@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Image Watermarking</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#000;font:14px/1.5 "Courier New",monospace}
+main{max-width:980px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:20px;margin:0 0 4px;text-transform:uppercase;letter-spacing:2px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #000;padding-bottom:4px;margin:32px 0 12px}
+p.sub{margin:0 0 16px;color:#555}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+label{display:block;font-weight:bold;margin-bottom:4px}
+input,select{width:100%;padding:8px;border:1px solid #000;background:#fff;color:#000;font:inherit;border-radius:0}
+input[type=range]{padding:0}
+button{margin-top:16px;padding:12px 24px;border:2px solid #000;background:#000;color:#fff;font:inherit;font-weight:bold;cursor:pointer;text-transform:uppercase;letter-spacing:1px}
+button:hover{background:#fff;color:#000}button:disabled{opacity:.4;cursor:wait}
+.imgs{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+figure{margin:0;border:1px solid #000;padding:8px}
+figcaption{font-weight:bold;margin-top:6px;text-transform:uppercase;font-size:12px}
+img{width:100%;display:block;image-rendering:auto}
+img.px{image-rendering:pixelated;max-width:256px}
+.stats{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}
+.stat{border:1px solid #000;padding:8px 14px;min-width:120px}
+.stat b{display:block;font-size:20px}
+table{width:100%;border-collapse:collapse}
+th,td{border:1px solid #000;padding:6px 10px;text-align:left}
+th{background:#000;color:#fff}
+tr.sel td{font-weight:bold;background:#eee}
+.bar{height:10px;background:#000}
+#err{border:2px solid #000;padding:8px;margin-top:12px;display:none}
+a.dl{display:inline-block;margin-top:8px;color:#000;font-weight:bold}
+#res{display:none}
+</style></head><body><main>
+<h1>Image Watermarking</h1>
+<p class="sub">Blind DWT + DCT watermark. Embed, attack, extract.</p>
+
+<h2>1. Input</h2>
+<div class="grid">
+  <div><label>Image</label><input type="file" id="image" accept="image/*"></div>
+  <div><label>Watermark text (max 6 chars)</label><input id="wm_text" value="WM" maxlength="6"></div>
+  <div><label>Or watermark image (optional)</label><input type="file" id="wm_file" accept="image/*"></div>
+  <div><label>Strength (delta): <span id="dv">60</span></label><input type="range" id="delta" min="10" max="120" value="60"></div>
+</div>
+
+<h2>2. Attack</h2>
+<div class="grid">
+  <div><label>Attack</label>
+    <select id="attack">
+      <option value="jpeg">JPEG compression (quality)</option>
+      <option value="noise">Gaussian noise (sigma)</option>
+      <option value="blur">Gaussian blur (kernel)</option>
+      <option value="resize">Resize down and up (%)</option>
+      <option value="cut">Cut out area (%)</option>
+      <option value="none">None</option>
+    </select></div>
+  <div><label>Level: <span id="sv">50</span></label><input type="range" id="strength" min="10" max="95" value="50"></div>
+</div>
+<button id="go">Run</button>
+<div id="err"></div>
+
+<div id="res">
+  <h2>3. Embedding quality</h2>
+  <div class="stats">
+    <div class="stat">PSNR<b id="psnr"></b>dB</div>
+    <div class="stat">SSIM<b id="ssim"></b></div>
+    <div class="stat">Size<b id="size"></b></div>
+  </div>
+  <div class="imgs">
+    <figure><img id="orig"><figcaption>Original</figcaption></figure>
+    <figure><img id="marked"><figcaption>Watermarked</figcaption>
+      <a class="dl" id="dl" download="watermarked.png">Download</a></figure>
+    <figure><img id="attacked"><figcaption>After attack</figcaption></figure>
+  </div>
+
+  <h2>4. Extraction (selected attack)</h2>
+  <div class="stats">
+    <div class="stat">NC<b id="nc"></b></div>
+    <div class="stat">BER<b id="ber"></b></div>
+  </div>
+  <div class="imgs">
+    <figure><img class="px" id="wm_orig"><figcaption>Original watermark</figcaption></figure>
+    <figure><img class="px" id="wm_ext"><figcaption>Extracted watermark</figcaption></figure>
+  </div>
+
+  <h2>5. Robustness table</h2>
+  <table id="tbl"></table>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const cfg={jpeg:[10,95,50],noise:[1,40,10],blur:[3,15,5],resize:[10,90,50],cut:[5,50,25],none:[0,0,0]};
+function setRange(){const c=cfg[$('attack').value],s=$('strength');
+  s.min=c[0];s.max=c[1];s.value=c[2];s.disabled=$('attack').value==='none';$('sv').textContent=s.value}
+$('attack').onchange=setRange;setRange();
+$('strength').oninput=e=>$('sv').textContent=e.target.value;
+$('delta').oninput=e=>$('dv').textContent=e.target.value;
+$('go').onclick=async()=>{
+  const f=$('image').files[0],err=$('err');err.style.display='none';
+  if(!f){err.textContent='Pick an image first.';err.style.display='block';return}
+  const fd=new FormData();fd.append('image',f);
+  if($('wm_file').files[0])fd.append('wm_file',$('wm_file').files[0]);
+  fd.append('wm_text',$('wm_text').value);fd.append('delta',$('delta').value);
+  fd.append('attack',$('attack').value);fd.append('strength',$('strength').value);
+  $('go').disabled=true;$('go').textContent='Working...';
+  try{
+    const r=await fetch('/run',{method:'POST',body:fd});const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Failed');
+    $('psnr').textContent=d.psnr;$('ssim').textContent=d.ssim;$('size').textContent=d.size.join('x');
+    $('nc').textContent=d.nc;$('ber').textContent=d.ber;
+    for(const k of ['orig','marked','attacked','wm_orig','wm_ext'])$(k).src=d[k];
+    $('dl').href=d.marked;
+    $('tbl').innerHTML='<tr><th>Attack</th><th>NC</th><th>BER</th><th>NC bar</th></tr>'+
+      d.table.map(t=>`<tr><td>${t.name}</td><td>${t.nc}</td><td>${t.ber}</td><td><div class="bar" style="width:${Math.max(0,t.nc)*100}%"></div></td></tr>`).join('');
+    $('res').style.display='block';$('res').scrollIntoView({behavior:'smooth'});
+  }catch(e){err.textContent=e.message;err.style.display='block'}
+  $('go').disabled=false;$('go').textContent='Run';
+};
+</script></main></body></html>
